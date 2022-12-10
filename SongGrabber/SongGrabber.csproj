@@ -15,4 +15,10 @@
     <WarningLevel>9999</WarningLevel>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="LibVLCSharp" Version="3.6.7" />
+    <PackageReference Include="NAudio" Version="2.1.0" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.18" />
+  </ItemGroup>
+
 </Project>

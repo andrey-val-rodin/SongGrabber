@@ -5,13 +5,16 @@ namespace SongGrabber.Grabbing
 {
     public sealed class MetadataStream : Stream
     {
-        private readonly Stream _sourceStream;
+        private readonly BufferedStream _sourceStream;
         private string _metadata;
         private int _dataCount;
 
-        public MetadataStream(Stream sourceStream, int icyMetaInt)
+        public MetadataStream(Stream sourceStream, int icyMetaInt, int bufferSize)
         {
-            _sourceStream = sourceStream ?? throw new ArgumentNullException(nameof(sourceStream));
+            if (sourceStream == null)
+                throw new ArgumentNullException(nameof(sourceStream));
+
+            _sourceStream = new BufferedStream(sourceStream, bufferSize);
             IcyMetaInt = icyMetaInt >= 0
                 ? icyMetaInt
                 : throw new ArgumentException($"{icyMetaInt} must be greater than or equal to zero");
@@ -41,7 +44,7 @@ namespace SongGrabber.Grabbing
 
         public override bool CanWrite => _sourceStream.CanWrite;
 
-        public override long Length => _sourceStream.Length;
+        public override long Length => _sourceStream.BufferSize;
 
         public override long Position
         {
@@ -88,7 +91,6 @@ namespace SongGrabber.Grabbing
         private void ReadMetadata()
         {
             // First byte contains size of metada in bytes / 16
-            long position = _sourceStream.Position;
             var firstByte = _sourceStream.ReadByte();
             if (firstByte == -1) // end of stream
                 return;
@@ -99,7 +101,7 @@ namespace SongGrabber.Grabbing
                 return;  // end of stream
 
             var metadata = Encoding.UTF8.GetString(bytes).TrimEnd('\0');
-            MetadataDiscovered?.Invoke(this, new MetadataEventArgs(position, size, metadata));
+            MetadataDiscovered?.Invoke(this, new MetadataEventArgs(metadata));
             Metadata = metadata;
         }
 

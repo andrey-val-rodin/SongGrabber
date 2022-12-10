@@ -11,7 +11,7 @@ while (!Uri.IsWellFormedUriString(url, UriKind.Absolute))
     url = Console.ReadLine();
 }
 
-var grabber = new Grabber(new ConsoleImpl());
+var grabber = new Grabber(new ConsoleImpl()) { NumberSongs = true };
 var error = await grabber.GrabAsync(new Uri(url));
 if (error != null)
     Console.WriteLine(error);
