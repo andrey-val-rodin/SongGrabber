@@ -1,21 +1,29 @@
 ﻿using LibVLCSharp.Shared;
-using Microsoft.VisualBasic;
 using NAudio.Wave;
+using SongGrabber.Handlers;
+using System.IO;
 using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
 
 namespace SongGrabber.Grabbing
 {
-    public class Grabber
+    public sealed class Grabber
     {
         private readonly IConsole _console;
+        private int _songCount;
+        private LibVLC _libVLC;
+        private Media _media;
+        private MediaPlayer _mediaPlayer;
+        private WaveOutEvent _outputDevice;
         private readonly HttpClient _httpClient = new();
         private int _icyMetaInt;
         private byte[] _buffer = new byte[65536];
-        private WaveOutEvent _outputDevice;
         private WaveFormat _waveFormat;
         private BufferedWaveProvider _waveProvider;
         private WaveFileWriter _writer;
+        string _result;
+        private CancellationTokenSource _tokenSource;
+        private readonly SemaphoreSlim _semaphore = new(1, 1);
 
         public Grabber() : this(null)
         {
@@ -34,95 +42,100 @@ namespace SongGrabber.Grabbing
         public bool NumberSongs { get; set; }
 
         public async Task<string> GrabAsync(
-            Uri uri, int songCount = int.MaxValue, CancellationToken token = default)
+            Uri uri, int songCount, CancellationToken token = default)
         {
+            try
+            {
+                await InitGrabbingAsync(uri, songCount, token);
+
+                _mediaPlayer.Play();
+                _outputDevice.Play();
+
+                // Wait until cansellation is requested
+                _tokenSource = new CancellationTokenSource();
+                token.Register(() => _tokenSource.Cancel());
+                await Task.Delay(TimeSpan.FromMilliseconds(-1), _tokenSource.Token);
+
+                //TODO
+                //What if MetadataChanged does't fired for very long time?
+            }
+            catch (TaskCanceledException)
+            {
+                // do nothing
+            }
+            catch (Exception e)
+            {
+                _result = e.Message;
+            }
+            finally
+            {
+                await FinishGrabbingAsync();
+            }
+
+            return _result;
+        }
+
+        private async Task InitGrabbingAsync(Uri uri, int songCount, CancellationToken token)
+        {
+            if (uri == null)
+                throw new ArgumentNullException(nameof(uri));
+            _songCount = songCount > 0
+                ? songCount
+                : throw new ArgumentException($"{songCount} must be greater than zero");
+
+            _result = null;
             Status = Status.PreparingStream;
             RecordedSongCount = 0;
             _icyMetaInt = 0;
             _console?.WriteLine(uri.ToString());
 
-            try
-            {
-                _console?.WriteLine("Accessing audiostream...");
-                await using var stream = await CreateStreamAsync(uri, token);
-                if (stream == null)
-                    return "Site does not support metadata";
+            _console?.WriteLine("Accessing audiostream...");
+            await using var stream = await CreateStreamAsync(uri, token);
+            if (stream == null)
+                _result = "Site does not support metadata";
 
-                // TODO: remove "enableDebugLogs" ->
-//                using var libVLC = new LibVLC();
-//                using var libVLC = new LibVLC("--quiet");
-                using var libVLC = new LibVLC(enableDebugLogs: true);
-                using var media = new Media(libVLC, new StreamMediaInput(stream));
-                using var mediaPlayer = new MediaPlayer(media);
+            stream.MetadataChanged += MetadataChangedHandler;
 
-                using var outputDevice = new WaveOutEvent();
-                _outputDevice = outputDevice;
-                _waveFormat = new WaveFormat(44100, 16, 2);
-                _waveProvider = new BufferedWaveProvider(_waveFormat);
-                outputDevice.Init(_waveProvider);
+            // TODO: remove "enableDebugLogs" ->
+            //                using var libVLC = new LibVLC();
+            //                using var libVLC = new LibVLC("--quiet");
+            _libVLC = new LibVLC(enableDebugLogs: true);
+            _media = new Media(_libVLC, new StreamMediaInput(stream));
+            _mediaPlayer = new MediaPlayer(_media);
 
-                mediaPlayer.SetAudioFormatCallback(AudioSetup, AudioCleanup);
-                mediaPlayer.SetAudioCallbacks(PlayAudio, PauseAudio, ResumeAudio, FlushAudio, DrainAudio);
-                stream.MetadataChanged += (s, e) =>
-                {
-                    if (!string.IsNullOrEmpty(e.NewStreamTitle))
-                    {
-                        Status = Status.Recording;
-                        var num = RecordedSongCount + 1;
-                        var numStr = NumberSongs ? $"{num.ToString("D2")} " : "";
-                        var filename = $"{numStr}{ValidateFilename(e.NewStreamTitle)}.wav";
-                        _console?.WriteLine($"Writing {filename}...");
-                        if (_writer != null)
-                        {
-                            _writer.Close();
-                            _writer = null;
-                            RecordedSongCount++;
-                        }
+            _outputDevice = new WaveOutEvent();
+            _waveFormat = new WaveFormat(44100, 16, 2);
+            _waveProvider = new BufferedWaveProvider(_waveFormat);
+            _outputDevice.Init(_waveProvider);
 
-                        if (RecordedSongCount < songCount)
-                            _writer = new WaveFileWriter(filename, _waveFormat);
-                    }
-                };
-
-                Status = Status.WaitingForNewSong;
-                _console?.WriteLine("Waiting for the next song...");
-                mediaPlayer.Play();
-                outputDevice.Play();
-
-                // TODO
-                // Remove cycle, replace by semaphore
-                Console.WriteLine("Press 'q' to quit. Press any other key to pause/play.");
-                while (true)
-                {
-                    if (Console.ReadKey().KeyChar == 'q')
-                        break;
-
-                    if (RecordedSongCount >= songCount)
-                        break;
-
-                    if (mediaPlayer.IsPlaying)
-                        mediaPlayer.Pause();
-                    else
-                        mediaPlayer.Play();
-                }
-                //TODO
-                //What if MetadataChanged does't fired for very long time?
-                _writer?.Close();
-                _writer = null;
-            }
-            catch (Exception e)
-            {
-                return e.Message;
-            }
-            finally
-            {
-                Status = Status.Idle;
-            }
-
-            return null;
+            _mediaPlayer.SetAudioFormatCallback(AudioSetup, null);
+            _mediaPlayer.SetAudioCallbacks(PlayAudio, null, null, FlushAudio, DrainAudio);
         }
 
-        async Task<MetadataStream> CreateStreamAsync(Uri uri, CancellationToken token)
+        private async Task FinishGrabbingAsync()
+        {
+            await Task.Yield();
+
+            _mediaPlayer?.Stop();
+            _outputDevice?.Stop();
+            
+            _outputDevice?.Dispose();
+            _mediaPlayer?.Dispose();
+            _media?.Dispose();
+            _libVLC?.Dispose();
+            _writer?.Close();
+            _tokenSource?.Dispose();
+
+            _tokenSource = null;
+            _writer = null;
+            _mediaPlayer = null;
+            _media = null;
+            _libVLC = null;
+
+            Status = Status.Idle;
+        }
+
+        private async Task<MetadataStream> CreateStreamAsync(Uri uri, CancellationToken token)
         {
             var request = new HttpRequestMessage
             {
@@ -141,7 +154,7 @@ namespace SongGrabber.Grabbing
             return new MetadataStream(sourceStream, _icyMetaInt, 4096);
         }
 
-        protected static int GetIcyMetaInt(HttpResponseHeaders headers)
+        private static int GetIcyMetaInt(HttpResponseHeaders headers)
         {
             const string header = "icy-metaint";
             if (!headers.Contains(header))
@@ -158,7 +171,15 @@ namespace SongGrabber.Grabbing
             return res;
         }
 
-        protected static string ValidateFilename(string filename)
+        private string GetFileName(string streamTitle)
+        {
+            var num = RecordedSongCount + 1;
+            var numStr = NumberSongs ? $"{num:D2} " : "";
+            var filename = $"{numStr}{ValidateFilename(streamTitle)}.wav";
+            return filename;
+        }
+
+        private static string ValidateFilename(string filename)
         {
             filename = filename.Replace('\"', '\'');
             if (filename.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
@@ -180,47 +201,89 @@ namespace SongGrabber.Grabbing
             return _buffer;
         }
 
-        #region Callbacks
-        void PlayAudio(IntPtr data, IntPtr samples, uint count, long pts)
+        #region Callbacks and handlers
+        private void MetadataChangedHandler(object sender, MetadataChangedEventArgs e)
         {
-            int bytes = (int)count * 4; // (16 bit, 2 channels)
-            var buffer = GetBuffer(bytes);
-            Marshal.Copy(samples, buffer, 0, bytes);
+            if (!string.IsNullOrEmpty(e.NewStreamTitle))
+            {
+                if (Status == Status.PreparingStream)
+                {
+                    // Skip currently playing song
+                    Status = Status.WaitingForNewSong;
+                    _console?.WriteLine("Waiting for the next song...");
+                    return;
+                }
 
-            _waveProvider.AddSamples(buffer, 0, bytes);
-            _writer?.Write(buffer, 0, bytes);
+                Status = Status.Recording;
+                _semaphore.Wait();
+                try
+                {
+                    if (_writer != null)
+                    {
+                        RecordedSongCount++;
+                        
+                        _writer.Close();
+                        _writer = null;
+                    }
+
+                    var filename = GetFileName(e.NewStreamTitle);
+                    _console?.WriteLine($"Writing {filename}...");
+
+                    if (RecordedSongCount < _songCount)
+                        _writer = new WaveFileWriter(filename, _waveFormat);
+                }
+                catch (Exception ex)
+                {
+                    _result = ex.Message;
+                }
+                finally
+                {
+                    _semaphore.Release();
+                }
+
+                if (RecordedSongCount >= _songCount)
+                    _tokenSource?.Cancel();
+            }
         }
 
-        int AudioSetup(ref IntPtr opaque, ref IntPtr format, ref uint rate, ref uint channels)
+        private int AudioSetup(ref IntPtr opaque, ref IntPtr format, ref uint rate, ref uint channels)
         {
             channels = (uint)_waveFormat.Channels;
             rate = (uint)_waveFormat.SampleRate;
             return 0;
         }
 
-        void DrainAudio(IntPtr data)
+        private void PlayAudio(IntPtr data, IntPtr samples, uint count, long pts)
+        {
+            int bytes = (int)count * 4; // (16 bit, 2 channels)
+            var buffer = GetBuffer(bytes);
+            Marshal.Copy(samples, buffer, 0, bytes);
+
+            _semaphore.Wait();
+            try
+            {
+                _waveProvider.AddSamples(buffer, 0, bytes);
+                _writer?.Write(buffer, 0, bytes);
+            }
+            catch (Exception ex)
+            {
+                _result = ex.Message;
+            }
+            finally
+            {
+                _semaphore.Release();
+            }
+        }
+
+        private void DrainAudio(IntPtr data)
         {
             _writer?.Flush();
         }
 
-        void FlushAudio(IntPtr data, long pts)
+        private void FlushAudio(IntPtr data, long pts)
         {
             _writer?.Flush();
             _waveProvider.ClearBuffer();
-        }
-
-        void ResumeAudio(IntPtr data, long pts)
-        {
-            _outputDevice.Play();
-        }
-
-        void PauseAudio(IntPtr data, long pts)
-        {
-            _outputDevice.Pause();
-        }
-
-        void AudioCleanup(IntPtr opaque)
-        {
         }
         #endregion
     }
