@@ -226,11 +226,13 @@ namespace SongGrabber.Grabbing
                         _writer = null;
                     }
 
-                    var filename = GetFileName(e.NewStreamTitle);
-                    _console?.WriteLine($"Writing {filename}...");
-
                     if (RecordedSongCount < _songCount)
+                    {
+                        var filename = GetFileName(e.NewStreamTitle);
+                        _console?.WriteLine($"Writing {filename}...");
+
                         _writer = new WaveFileWriter(filename, _waveFormat);
+                    }
                 }
                 catch (Exception ex)
                 {
