@@ -1,7 +1,6 @@
 ﻿using LibVLCSharp.Shared;
 using NAudio.Wave;
 using SongGrabber.Handlers;
-using System.IO;
 using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
 
@@ -21,9 +20,9 @@ namespace SongGrabber.Grabbing
         private WaveFormat _waveFormat;
         private BufferedWaveProvider _waveProvider;
         private WaveFileWriter _writer;
-        string _result;
+        private readonly object _lockObj = new ();
+        private ResultImpl _result;
         private CancellationTokenSource _tokenSource;
-        private readonly SemaphoreSlim _semaphore = new(1, 1);
 
         public Grabber() : this(null)
         {
@@ -41,7 +40,7 @@ namespace SongGrabber.Grabbing
         public int RecordedSongCount { get; private set; }
         public bool NumberSongs { get; set; }
 
-        public async Task<string> GrabAsync(
+        public async Task<IResult> GrabAsync(
             Uri uri, int songCount, CancellationToken token = default)
         {
             try
@@ -53,7 +52,7 @@ namespace SongGrabber.Grabbing
 
                 // Wait until cansellation is requested
                 _tokenSource = new CancellationTokenSource();
-                token.Register(() => _tokenSource.Cancel());
+                token.Register(() => _tokenSource?.Cancel());
                 await Task.Delay(TimeSpan.FromMilliseconds(-1), _tokenSource.Token);
 
                 //TODO
@@ -61,11 +60,18 @@ namespace SongGrabber.Grabbing
             }
             catch (TaskCanceledException)
             {
-                // do nothing
+                if (token.IsCancellationRequested)
+                {
+                    // Canceled from outside
+                    _result.Error = "Canceled";
+                    RemoveLastSong("Deleted due to cancellation");
+                }
             }
             catch (Exception e)
             {
-                _result = e.Message;
+                _result.Error = e.Message;
+                RemoveLastSong("Deleted due to error");
+                _tokenSource?.Cancel();
             }
             finally
             {
@@ -83,7 +89,7 @@ namespace SongGrabber.Grabbing
                 ? songCount
                 : throw new ArgumentException($"{songCount} must be greater than zero");
 
-            _result = null;
+            _result = new ResultImpl(uri, Directory.GetCurrentDirectory());
             Status = Status.PreparingStream;
             RecordedSongCount = 0;
             _icyMetaInt = 0;
@@ -92,7 +98,7 @@ namespace SongGrabber.Grabbing
             _console?.WriteLine("Accessing audiostream...");
             await using var stream = await CreateStreamAsync(uri, token);
             if (stream == null)
-                _result = "Site does not support metadata";
+                _result.Error = "Site does not support metadata";
 
             stream.MetadataChanged += MetadataChangedHandler;
 
@@ -114,6 +120,9 @@ namespace SongGrabber.Grabbing
 
         private async Task FinishGrabbingAsync()
         {
+            if (Status == Status.Idle)
+                return; // already finished
+
             await Task.Yield();
 
             _mediaPlayer?.Stop();
@@ -133,6 +142,38 @@ namespace SongGrabber.Grabbing
             _libVLC = null;
 
             Status = Status.Idle;
+        }
+
+        private void RemoveLastSong(string cause)
+        {
+            bool __lockWasTaken = false;
+            try
+            {
+                Monitor.Enter(_lockObj, ref __lockWasTaken);
+
+                if (_writer != null)
+                {
+                    _writer.Close();
+                    _writer = null;
+                }
+
+                var lastSong = _result.Songs.LastOrDefault();
+                if (lastSong != null)
+                {
+                    File.Delete(lastSong.Filename);
+                    lastSong.Status = SongStatus.Deleted;
+                    lastSong.Notes = cause;
+                }
+            }
+            catch (Exception e)
+            {
+                _result.Error = e.Message;
+            }
+            finally
+            {
+                if (__lockWasTaken)
+                    Monitor.Exit(_lockObj);
+            }
         }
 
         private async Task<MetadataStream> CreateStreamAsync(Uri uri, CancellationToken token)
@@ -215,36 +256,51 @@ namespace SongGrabber.Grabbing
                 }
 
                 Status = Status.Recording;
-                _semaphore.Wait();
+                bool __lockWasTaken = false;
                 try
                 {
+                    Monitor.Enter(_lockObj, ref __lockWasTaken);
+
                     if (_writer != null)
                     {
+                        // Close previous song
                         RecordedSongCount++;
-                        
+
                         _writer.Close();
                         _writer = null;
+
+                        var lastSong = _result.Songs.LastOrDefault();
+                        lastSong.Status = SongStatus.Downloaded;
                     }
 
                     if (RecordedSongCount < _songCount)
                     {
+                        // Start new song
                         var filename = GetFileName(e.NewStreamTitle);
                         _console?.WriteLine($"Writing {filename}...");
 
                         _writer = new WaveFileWriter(filename, _waveFormat);
+                        _result.Songs.Add(new Song()
+                        {
+                            Filename = filename,
+                            Status = SongStatus.Downloading
+                        });
                     }
                 }
                 catch (Exception ex)
                 {
-                    _result = ex.Message;
+                    _result.Error = ex.Message;
+                    RemoveLastSong("Deleted due to error");
+                    _tokenSource?.Cancel();
                 }
                 finally
                 {
-                    _semaphore.Release();
-                }
+                    if (__lockWasTaken)
+                        Monitor.Exit(_lockObj);
 
-                if (RecordedSongCount >= _songCount)
-                    _tokenSource?.Cancel();
+                    if (RecordedSongCount >= _songCount)
+                        _tokenSource?.Cancel();
+                }
             }
         }
 
@@ -261,19 +317,24 @@ namespace SongGrabber.Grabbing
             var buffer = GetBuffer(bytes);
             Marshal.Copy(samples, buffer, 0, bytes);
 
-            _semaphore.Wait();
+            bool __lockWasTaken = false;
             try
             {
+                Monitor.Enter(_lockObj, ref __lockWasTaken);
+
                 _waveProvider.AddSamples(buffer, 0, bytes);
                 _writer?.Write(buffer, 0, bytes);
             }
-            catch (Exception ex)
+            catch (Exception e)
             {
-                _result = ex.Message;
+                _result.Error = e.Message;
+                RemoveLastSong("Deleted due to error");
+                _tokenSource?.Cancel();
             }
             finally
             {
-                _semaphore.Release();
+                if (__lockWasTaken)
+                    Monitor.Exit(_lockObj);
             }
         }
 

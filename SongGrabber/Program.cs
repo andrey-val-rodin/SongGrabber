@@ -14,25 +14,29 @@ while (!Uri.IsWellFormedUriString(url, UriKind.Absolute))
 var grabber = new Grabber(new ConsoleImpl()) { NumberSongs = true };
 CancellationTokenSource tokenSource = new();
 var grabTask = grabber.GrabAsync(new Uri(url), 5, tokenSource.Token);
-var readKeyTask = new Task(ListenForEsc);
-readKeyTask.Start();
-Console.WriteLine("Press 'Esc' to quit");
-
-var tasks = new[] { grabTask, readKeyTask };
-Task.WaitAny(tasks);
-
-if (grabTask.IsCompleted)
-{
-    var error = grabTask.Result;
-    if (error != null)
-        Console.WriteLine(error);
-}
-
-static void ListenForEsc()
+var readKeyTask = new Task(() =>
 {
     ConsoleKeyInfo key = new();
     while (!Console.KeyAvailable && key.Key != ConsoleKey.Escape)
     {
         key = Console.ReadKey(true);
     }
+
+    tokenSource.Cancel();
+});
+readKeyTask.Start();
+Console.WriteLine("Press 'Esc' to quit");
+
+var tasks = new[] { grabTask, readKeyTask };
+Task.WaitAny(tasks);
+
+if (!grabTask.IsCompleted)
+    await grabTask;
+
+var result = grabTask.Result;
+if (result != null)
+{
+    Console.WriteLine();
+    Console.WriteLine();
+    Console.WriteLine(result.ToString());
 }
