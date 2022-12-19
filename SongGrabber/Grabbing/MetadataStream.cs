@@ -38,18 +38,18 @@ namespace SongGrabber.Grabbing
             }
         }
 
-        public override bool CanRead => _sourceStream.CanRead;
+        public override bool CanRead => true;
 
-        public override bool CanSeek => _sourceStream.CanSeek;
+        public override bool CanSeek => false;
 
-        public override bool CanWrite => _sourceStream.CanWrite;
+        public override bool CanWrite => false;
 
         public override long Length => _sourceStream.BufferSize;
 
         public override long Position
         {
             get => _sourceStream.Position;
-            set { _sourceStream.Position = value; }
+            set => throw new InvalidOperationException();
         }
 
         public override void Flush()
@@ -107,17 +107,17 @@ namespace SongGrabber.Grabbing
 
         public override long Seek(long offset, SeekOrigin origin)
         {
-            return _sourceStream.Seek(offset, origin);
+            throw new InvalidOperationException();
         }
 
         public override void SetLength(long value)
         {
-            _sourceStream.SetLength(value);
+            throw new InvalidOperationException();
         }
 
         public override void Write(byte[] buffer, int offset, int count)
         {
-            _sourceStream.Write(buffer, offset, count);
+            throw new InvalidOperationException();
         }
     }
 }

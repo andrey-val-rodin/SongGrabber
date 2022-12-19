@@ -45,7 +45,8 @@ namespace SongGrabber.Grabbing
         {
             try
             {
-                await InitGrabbingAsync(uri, songCount, token);
+                if (!await InitGrabbingAsync(uri, songCount, token))
+                    return _result;
 
                 _mediaPlayer.Play();
                 _outputDevice.Play();
@@ -81,7 +82,7 @@ namespace SongGrabber.Grabbing
             return _result;
         }
 
-        private async Task InitGrabbingAsync(Uri uri, int songCount, CancellationToken token)
+        private async Task<bool> InitGrabbingAsync(Uri uri, int songCount, CancellationToken token)
         {
             if (uri == null)
                 throw new ArgumentNullException(nameof(uri));
@@ -98,7 +99,10 @@ namespace SongGrabber.Grabbing
             _console?.WriteLine("Accessing audiostream...");
             await using var stream = await CreateStreamAsync(uri, token);
             if (stream == null)
+            {
                 _result.Error = "Site does not support metadata";
+                return false;
+            }
 
             stream.MetadataChanged += MetadataChangedHandler;
 
@@ -116,6 +120,8 @@ namespace SongGrabber.Grabbing
 
             _mediaPlayer.SetAudioFormatCallback(AudioSetup, null);
             _mediaPlayer.SetAudioCallbacks(PlayAudio, null, null, FlushAudio, DrainAudio);
+
+            return true;
         }
 
         private async Task FinishGrabbingAsync()
