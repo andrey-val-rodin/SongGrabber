@@ -198,7 +198,7 @@ namespace SongGrabber.Grabbing
                 return null;
 
             var sourceStream = response.Content.ReadAsStream(token);
-            return new MetadataStream(sourceStream, _icyMetaInt, 4096);
+            return new MetadataStream(sourceStream, _icyMetaInt);
         }
 
         private static int GetIcyMetaInt(HttpResponseHeaders headers)

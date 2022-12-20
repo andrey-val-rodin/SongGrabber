@@ -9,15 +9,17 @@ namespace SongGrabber.Grabbing
         private string _metadata;
         private int _dataCount;
 
-        public MetadataStream(Stream sourceStream, int icyMetaInt, int bufferSize)
+        public MetadataStream(Stream sourceStream, int icyMetaInt)
         {
             if (sourceStream == null)
                 throw new ArgumentNullException(nameof(sourceStream));
 
-            _sourceStream = new BufferedStream(sourceStream, bufferSize);
+            _sourceStream = new BufferedStream(sourceStream, 4096);
             IcyMetaInt = icyMetaInt >= 0
                 ? icyMetaInt
-                : throw new ArgumentException($"{icyMetaInt} must be greater than or equal to zero");
+                : throw new ArgumentException(
+                    $"{nameof(icyMetaInt)} must be greater than or equal to zero",
+                    nameof(icyMetaInt));
         }
 
         public event EventHandler<MetadataEventArgs> MetadataDiscovered;
