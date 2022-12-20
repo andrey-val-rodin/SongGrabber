@@ -5,7 +5,7 @@ namespace SongGrabber.Grabbing
 {
     public sealed class MetadataStream : Stream
     {
-        private readonly BufferedStream _sourceStream;
+        private readonly Stream _sourceStream;
         private string _metadata;
         private int _dataCount;
 
@@ -14,7 +14,7 @@ namespace SongGrabber.Grabbing
             if (sourceStream == null)
                 throw new ArgumentNullException(nameof(sourceStream));
 
-            _sourceStream = new BufferedStream(sourceStream, 4096);
+            _sourceStream = sourceStream;
             IcyMetaInt = icyMetaInt >= 0
                 ? icyMetaInt
                 : throw new ArgumentException(
@@ -46,7 +46,7 @@ namespace SongGrabber.Grabbing
 
         public override bool CanWrite => false;
 
-        public override long Length => _sourceStream.BufferSize;
+        public override long Length => 4096;
 
         public override long Position
         {
@@ -71,23 +71,32 @@ namespace SongGrabber.Grabbing
             if (count < 0)
                 throw new ArgumentOutOfRangeException(nameof(count));
 
-            for (int i = 0; i < count; i++)
+            if (IcyMetaInt == 0)
+                return _sourceStream.Read(buffer, offset, count);
+
+            int result = 0;
+            while (result < count)
             {
-                if (IcyMetaInt > 0 && _dataCount == IcyMetaInt)
+                if (_dataCount == IcyMetaInt)
                 {
                     ReadMetadata();
                     _dataCount = 0;
                 }
 
-                var value = _sourceStream.ReadByte();
-                if (value == -1) // end of stream
-                    return i;
-
-                _dataCount++;
-                buffer[i + offset] = (byte)value;
+                var rest = IcyMetaInt - _dataCount;
+                var c = Math.Min(rest, count);
+                var read = _sourceStream.Read(buffer, offset, c);
+                offset += read;
+                result += read;
+                _dataCount += read;
+                if (read < c)
+                {
+                    // End of stream
+                    return result;
+                }
             }
 
-            return count;
+            return result;
         }
 
         private void ReadMetadata()

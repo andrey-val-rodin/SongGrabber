@@ -75,12 +75,13 @@ namespace Tests.Grabbing
                 metadataCount++;
             };
 
-            int count;
+            int count = 0, c = 0;
             int patternPos = 0;
             var buffer = new byte[readCount];
-            while ((count = stream.Read(buffer, 0, readCount)) > 0)
+            while ((c = stream.Read(buffer, 0, readCount)) > 0)
             {
-                CheckBuffer(buffer, count, ref patternPos);
+                CheckBuffer(buffer, c, ref patternPos);
+                count += c;
             }
 
             if (icyMetaInt > 0)
@@ -88,6 +89,9 @@ namespace Tests.Grabbing
                 // Verify exact metadata count
                 Assert.Equal(totalCount / icyMetaInt, metadataCount);
             }
+
+            // Entire stream must be read
+            Assert.Equal(totalCount, count);
         }
 
         private static MemoryStream Generate(int totalCount, int icyMetaInt)
