@@ -1,4 +1,5 @@
 ﻿// See https://aka.ms/new-console-template for more information
+using LibVLCSharp.Shared;
 using SongGrabber;
 using SongGrabber.Grabbing;
 
@@ -11,7 +12,12 @@ while (!Uri.IsWellFormedUriString(url, UriKind.Absolute))
     url = Console.ReadLine();
 }
 
-var grabber = new Grabber(new ConsoleImpl()) { NumberSongs = true };
+// Initialization
+Core.Initialize();
+// var libVLC = new LibVLC("--quiet");
+var libVLC = new LibVLC(enableDebugLogs: true);
+
+var grabber = new Grabber(libVLC, new ConsoleImpl()) { NumberSongs = true };
 CancellationTokenSource tokenSource = new();
 var grabTask = grabber.GrabAsync(new Uri(url), 5, tokenSource.Token);
 var readKeyTask = new Task(() =>

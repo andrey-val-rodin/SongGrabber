@@ -1,4 +1,5 @@
 ﻿using SongGrabber.Handlers;
+using System;
 using System.Text;
 
 namespace SongGrabber.Grabbing
@@ -11,10 +12,7 @@ namespace SongGrabber.Grabbing
 
         public MetadataStream(Stream sourceStream, int icyMetaInt)
         {
-            if (sourceStream == null)
-                throw new ArgumentNullException(nameof(sourceStream));
-
-            _sourceStream = sourceStream;
+            _sourceStream = sourceStream ?? throw new ArgumentNullException(nameof(sourceStream));
             IcyMetaInt = icyMetaInt >= 0
                 ? icyMetaInt
                 : throw new ArgumentException(
@@ -71,25 +69,59 @@ namespace SongGrabber.Grabbing
             if (count < 0)
                 throw new ArgumentOutOfRangeException(nameof(count));
 
-            if (IcyMetaInt == 0)
-                return _sourceStream.Read(buffer, offset, count);
-
             int result = 0;
+            int countToRead = count;
             while (result < count)
             {
-                if (_dataCount == IcyMetaInt)
+                if (IcyMetaInt > 0 && _dataCount == IcyMetaInt)
                 {
                     ReadMetadata();
                     _dataCount = 0;
                 }
 
-                var rest = IcyMetaInt - _dataCount;
-                var c = Math.Min(rest, count);
-                var read = _sourceStream.Read(buffer, offset, c);
-                offset += read;
-                result += read;
-                _dataCount += read;
-                if (read < c)
+                var rest = IcyMetaInt > 0 ? IcyMetaInt - _dataCount : int.MaxValue;
+                var c = Math.Min(rest, countToRead);
+                var readed = _sourceStream.Read(buffer, offset, c);
+                result += readed;
+                _dataCount += readed;
+                offset += readed;
+                countToRead -= readed;
+
+                if (readed < c)
+                {
+                    // End of stream
+                    return result;
+                }
+            }
+
+            return result;
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            if (buffer == null)
+                throw new ArgumentNullException(nameof(buffer));
+
+            int result = 0;
+            int countToRead = buffer.Length;
+            int offset = 0;
+            while (result < buffer.Length)
+            {
+                if (IcyMetaInt > 0 && _dataCount == IcyMetaInt)
+                {
+                    ReadMetadata();
+                    _dataCount = 0;
+                }
+
+                var rest = IcyMetaInt > 0 ? IcyMetaInt - _dataCount : int.MaxValue;
+                var c = Math.Min(rest, countToRead);
+                var readed = _sourceStream.Read(buffer.Slice(offset, c));
+                result += readed;
+                _dataCount += readed;
+                offset += readed;
+                countToRead -= readed;
+
+                if (readed < c)
                 {
                     // End of stream
                     return result;
