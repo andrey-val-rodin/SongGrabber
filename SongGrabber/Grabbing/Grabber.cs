@@ -10,7 +10,8 @@ namespace SongGrabber.Grabbing
     {
         private readonly IConsole _console;
         private int _songCount;
-        private LibVLC _libVLC;
+        private readonly LibVLC _libVLC;
+        private MetadataStream _stream;
         private Media _media;
         private MediaPlayer _mediaPlayer;
         private WaveOutEvent _outputDevice;
@@ -24,16 +25,15 @@ namespace SongGrabber.Grabbing
         private ResultImpl _result;
         private CancellationTokenSource _tokenSource;
 
-        public Grabber() : this(null)
+        public Grabber(LibVLC libVLC) : this(libVLC, null)
         {
         }
 
-        public Grabber(IConsole console)
+        public Grabber(LibVLC libVLC, IConsole console)
         {
-            Core.Initialize();
-
-            Status = Status.Idle;
+            _libVLC = libVLC ?? throw new ArgumentNullException(nameof(libVLC));
             _console = console;
+            Status = Status.Idle;
         }
 
         public Status Status { get; private set; }
@@ -97,20 +97,16 @@ namespace SongGrabber.Grabbing
             _console?.WriteLine(uri.ToString());
 
             _console?.WriteLine("Accessing audiostream...");
-            await using var stream = await CreateStreamAsync(uri, token);
-            if (stream == null)
+            _stream = await CreateStreamAsync(uri, token);
+            if (_stream == null)
             {
                 _result.Error = "Site does not support metadata";
                 return false;
             }
 
-            stream.MetadataChanged += MetadataChangedHandler;
+            _stream.MetadataChanged += MetadataChangedHandler;
 
-            // TODO: remove "enableDebugLogs" ->
-            //                using var libVLC = new LibVLC();
-            //                using var libVLC = new LibVLC("--quiet");
-            _libVLC = new LibVLC(enableDebugLogs: true);
-            _media = new Media(_libVLC, new StreamMediaInput(stream));
+            _media = new Media(_libVLC, new StreamMediaInput(_stream), ":no-video");
             _mediaPlayer = new MediaPlayer(_media);
 
             _outputDevice = new WaveOutEvent();
@@ -137,15 +133,15 @@ namespace SongGrabber.Grabbing
             _outputDevice?.Dispose();
             _mediaPlayer?.Dispose();
             _media?.Dispose();
-            _libVLC?.Dispose();
             _writer?.Close();
+            _stream?.Dispose();
             _tokenSource?.Dispose();
 
             _tokenSource = null;
             _writer = null;
             _mediaPlayer = null;
             _media = null;
-            _libVLC = null;
+            _stream = null;
 
             Status = Status.Idle;
         }
