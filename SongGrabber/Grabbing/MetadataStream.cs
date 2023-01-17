@@ -68,6 +68,26 @@ namespace SongGrabber.Grabbing
             if (count < 0)
                 throw new ArgumentOutOfRangeException(nameof(count));
 
+            return ReadToSpanOrArray(null, buffer, offset, count);
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            if (buffer == null)
+                throw new ArgumentNullException(nameof(buffer));
+
+            return ReadToSpanOrArray(buffer, null, 0, buffer.Length);
+        }
+
+        /// <summary>
+        /// Span<byte> is a ref struct and therefore has limitations (no interfaces, no member vars, no generics).
+        /// So I have to use this awkward method to avoid code duplication
+        /// </summary>
+        private int ReadToSpanOrArray(Span<byte> span, byte[] array, int offset, int count)
+        {
+            if (span == null && array == null)
+                throw new ArgumentNullException(nameof(span));
+
             int result = 0;
             int countToRead = count;
             while (result < count)
@@ -80,41 +100,10 @@ namespace SongGrabber.Grabbing
 
                 var rest = IcyMetaInt > 0 ? IcyMetaInt - _dataCount : int.MaxValue;
                 var c = Math.Min(rest, countToRead);
-                var readed = _sourceStream.Read(buffer, offset, c);
-                result += readed;
-                _dataCount += readed;
-                offset += readed;
-                countToRead -= readed;
-
-                if (readed < c)
-                {
-                    // End of stream
-                    return result;
-                }
-            }
-
-            return result;
-        }
-
-        public override int Read(Span<byte> buffer)
-        {
-            if (buffer == null)
-                throw new ArgumentNullException(nameof(buffer));
-
-            int result = 0;
-            int countToRead = buffer.Length;
-            int offset = 0;
-            while (result < buffer.Length)
-            {
-                if (IcyMetaInt > 0 && _dataCount == IcyMetaInt)
-                {
-                    ReadMetadata();
-                    _dataCount = 0;
-                }
-
-                var rest = IcyMetaInt > 0 ? IcyMetaInt - _dataCount : int.MaxValue;
-                var c = Math.Min(rest, countToRead);
-                var readed = _sourceStream.Read(buffer.Slice(offset, c));
+                // Read to span or array
+                var readed = (span != null)
+                    ? _sourceStream.Read(span.Slice(offset, c))
+                    : _sourceStream.Read(array, offset, c);
                 result += readed;
                 _dataCount += readed;
                 offset += readed;
