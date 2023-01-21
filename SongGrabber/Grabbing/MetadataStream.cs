@@ -15,7 +15,7 @@ namespace SongGrabber.Grabbing
             IcyMetaInt = icyMetaInt >= 0
                 ? icyMetaInt
                 : throw new ArgumentException(
-                    $"{nameof(icyMetaInt)} must be greater than or equal to zero",
+                    $"{nameof(icyMetaInt)} must be greater than or equal to zero.",
                     nameof(icyMetaInt));
         }
 
@@ -62,7 +62,7 @@ namespace SongGrabber.Grabbing
                 throw new ArgumentNullException(nameof(buffer));
             if (count + offset > buffer.Length)
                 throw new ArgumentException(
-                    "Offset and length were out of bounds for the array or count is greater than the number of elements from index to the end of the source collection");
+                    "Offset and length were out of bounds for the array or count is greater than the number of elements from index to the end of the source collection.");
             if (offset < 0)
                 throw new ArgumentOutOfRangeException(nameof(offset));
             if (count < 0)

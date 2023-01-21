@@ -12,6 +12,7 @@ namespace SongGrabber.Grabbing
         private int _songCount;
         private readonly LibVLC _libVLC;
         private MetadataStream _stream;
+        private Queue _queue;
         private Media _media;
         private MediaPlayer _mediaPlayer;
         private WaveOutEvent _outputDevice;
@@ -88,7 +89,7 @@ namespace SongGrabber.Grabbing
                 throw new ArgumentNullException(nameof(uri));
             _songCount = songCount > 0
                 ? songCount
-                : throw new ArgumentException($"{songCount} must be greater than zero");
+                : throw new ArgumentException($"{songCount} must be greater than zero.");
 
             _result = new ResultImpl(uri, Directory.GetCurrentDirectory());
             Status = Status.PreparingStream;
@@ -106,7 +107,11 @@ namespace SongGrabber.Grabbing
 
             _stream.MetadataChanged += MetadataChangedHandler;
 
-            _media = new Media(_libVLC, new StreamMediaInput(_stream), ":no-video");
+            _queue = new Queue(_stream);
+            // Let queue load some data from http stream
+            await Task.Delay(1000, token);
+
+            _media = new Media(_libVLC, new QueueMediaInput(_queue), ":no-video");
             _mediaPlayer = new MediaPlayer(_media);
 
             _outputDevice = new WaveOutEvent();
@@ -135,6 +140,7 @@ namespace SongGrabber.Grabbing
             _media?.Dispose();
             _writer?.Close();
             _stream?.Dispose();
+            _queue?.Dispose();
             _tokenSource?.Dispose();
 
             _tokenSource = null;
@@ -142,6 +148,7 @@ namespace SongGrabber.Grabbing
             _mediaPlayer = null;
             _media = null;
             _stream = null;
+            _queue = null;
 
             Status = Status.Idle;
         }
