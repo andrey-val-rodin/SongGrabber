@@ -51,13 +51,13 @@ namespace SongGrabber.Grabbing
                 _mediaPlayer.Play();
                 _outputDevice.Play();
 
-                // Wait until cansellation is requested
+                // Wait until cancellation is requested
                 _tokenSource = new CancellationTokenSource();
                 token.Register(() => _tokenSource?.Cancel());
                 await Task.Delay(TimeSpan.FromMilliseconds(-1), _tokenSource.Token);
 
                 //TODO
-                //What if MetadataChanged does't fired for very long time?
+                //What if MetadataChanged doesn't fired for very long time?
             }
             catch (TaskCanceledException)
             {
@@ -96,7 +96,7 @@ namespace SongGrabber.Grabbing
             _icyMetaInt = 0;
             _console?.WriteLine(uri.ToString());
 
-            _console?.WriteLine("Accessing audiostream...");
+            _console?.WriteLine("Accessing audio stream...");
             _stream = await CreateStreamAsync(uri, token);
             if (_stream == null)
             {
